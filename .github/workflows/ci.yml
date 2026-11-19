@@ -1,28 +1,75 @@
 name: ci
 
 on:
-  push:
-    branches: [main]
   pull_request:
     branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read          # least privilege: this workflow only reads the code
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  PYTHON_VERSION: "3.12"
 
 jobs:
   lint:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-python@v6
         with:
-          python-version: "3.12"
+          python-version: ${{ env.PYTHON_VERSION }}
       - run: pip install ruff==0.17.5
       - run: ruff check --output-format=github .
 
   unit-tests:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-python@v6
         with:
-          python-version: "3.12"
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: requirements-*.txt
       - run: pip install -r requirements-dev.txt
-      - run: pytest -m unit
+      - run: pytest -m unit --junitxml=reports/unit.xml
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: unit-test-report
+          path: reports/
+          retention-days: 7
+
+  integration-tests:
+    needs: unit-tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: requirements-*.txt
+      - run: pip install -r requirements-dev.txt
+      - name: Fetch the pinned model release
+        run: scripts/fetch_model.sh
+      - name: API tests and model-quality gate
+        env:
+          MODEL_PATH: models/model.pt
+        run: pytest -m "integration or quality" -s --junitxml=reports/integration.xml
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: integration-test-report
+          path: reports/
+          retention-days: 7
