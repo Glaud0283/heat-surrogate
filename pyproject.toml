@@ -1,0 +1,19 @@
+# Tool settings only: this repo is not an installable package.
+
+[tool.ruff]
+line-length = 110
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I"]   # pycodestyle errors, pyflakes, import order
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]          # so tests can import serve.py and src/
+addopts = "-ra --strict-markers"
+markers = [
+    "unit: fast, isolated, no model file or network",
+    "integration: the HTTP API end to end, with a tiny throwaway model",
+    "quality: the released model checked against the solver",
+    "gpu: needs a CUDA GPU; never runs on GitHub-hosted runners",
+]

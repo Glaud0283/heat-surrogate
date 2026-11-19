@@ -1,0 +1,39 @@
+# Inference image: only what serving needs. The released model is baked in,
+# so one image tag = one exact (code, model) pair that can be promoted and rolled back.
+FROM python:3.12-slim
+
+LABEL org.opencontainers.image.title="heat-serve" \
+      org.opencontainers.image.description="Inference API for the heat-conduction surrogate" \
+      org.opencontainers.image.source="https://github.com/YOUR-GITHUB/heat-surrogate" \
+      org.opencontainers.image.licenses="MIT"
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    MODEL_PATH=/app/models/model.pt
+
+WORKDIR /app
+
+COPY requirements-serve.txt .
+RUN pip install --no-cache-dir -r requirements-serve.txt
+
+RUN useradd --create-home --uid 1000 app
+
+COPY src/__init__.py src/model.py ./src/
+COPY serve.py .
+COPY models/model.pt ./models/model.pt
+
+# Build metadata goes last: a new commit only rebuilds these tiny layers.
+ARG GIT_SHA=unknown
+ARG MODEL_VERSION=unknown
+ENV GIT_SHA=${GIT_SHA} \
+    MODEL_VERSION=${MODEL_VERSION}
+LABEL org.opencontainers.image.revision=${GIT_SHA}
+
+USER app
+
+EXPOSE 8000
+
+HEALTHCHECK --interval=30s --timeout=3s --start-period=15s --retries=3 \
+    CMD ["python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2)"]
+
+CMD ["uvicorn", "serve:app", "--host", "0.0.0.0", "--port", "8000"]

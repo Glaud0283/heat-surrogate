@@ -1,0 +1,6 @@
+# Everything for training, testing and linting on your laptop and in CI.
+-r requirements-serve.txt
+scipy==1.15.3
+pytest==9.2.0
+httpx==0.28.1
+ruff==0.17.5
