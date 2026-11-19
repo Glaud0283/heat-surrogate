@@ -1,4 +1,5 @@
 """HTTP inference API for the heat surrogate."""
+import json
 import os
 from contextlib import asynccontextmanager
 
