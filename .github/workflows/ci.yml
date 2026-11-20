@@ -3,8 +3,7 @@ name: ci
 on:
   pull_request:
     branches: [main]
-  push:
-    branches: [main]
+  workflow_call:          # deploy.yml runs these same checks before building
 
 permissions:
   contents: read          # least privilege: this workflow only reads the code
@@ -73,3 +72,33 @@ jobs:
           name: integration-test-report
           path: reports/
           retention-days: 7
+
+  docker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Fetch the pinned model release
+        run: scripts/fetch_model.sh
+      - uses: docker/setup-buildx-action@v3
+      - name: Build the serving image (not pushed)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.serve
+          load: true
+          tags: heat-serve:ci
+          build-args: |
+            GIT_SHA=${{ github.sha }}
+            MODEL_VERSION=${{ env.MODEL_VERSION }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Container smoke test
+        run: |
+          docker run -d --name api -p 8000:8000 heat-serve:ci
+          scripts/smoke_test.sh http://localhost:8000 "${{ github.sha }}"
+      - name: Container logs
+        if: always()
+        run: docker logs api || true
