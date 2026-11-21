@@ -3,6 +3,7 @@ name: deploy
 on:
   push:
     branches: [main]
+  workflow_dispatch:      # "Run workflow" button: redeploy main without a new commit
 
 permissions:
   contents: read
@@ -17,32 +18,78 @@ jobs:
     timeout-minutes: 20
     permissions:
       contents: read
-      packages: write     # only this job may push to GitHub's registry
+      id-token: write     # lets this job ask GitHub for an OIDC token
     env:
       GH_TOKEN: ${{ github.token }}
+      IMAGE: ${{ vars.ECR_REGISTRY }}/heat-serve:${{ github.sha }}
     steps:
       - uses: actions/checkout@v6
-      - name: Fetch the pinned model release
-        run: scripts/fetch_model.sh
-      - name: Image name (registry paths must be lower-case)
-        run: echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/heat-serve" >> "$GITHUB_ENV"
-      - uses: docker/login-action@v3
+      - uses: aws-actions/configure-aws-credentials@v5
         with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          role-to-assume: ${{ vars.AWS_PUSH_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+      - name: Reuse the image if this commit was already built
+        id: exists
+        run: |
+          if aws ecr describe-images --repository-name heat-serve \
+               --image-ids imageTag="$GITHUB_SHA" > /dev/null 2>&1; then
+            echo "found=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::$IMAGE already exists. Tags are immutable, so it is reused."
+          fi
+      - uses: aws-actions/amazon-ecr-login@v2
       - uses: docker/setup-buildx-action@v3
-      - name: Build and push
+      - name: Fetch the pinned model release
+        if: steps.exists.outputs.found != 'true'
+        run: scripts/fetch_model.sh
+      - name: Build and push ${{ env.IMAGE }}
+        if: steps.exists.outputs.found != 'true'
         uses: docker/build-push-action@v6
         with:
           context: .
           file: Dockerfile.serve
           push: true
-          tags: |
-            ${{ env.IMAGE }}:${{ github.sha }}
-            ${{ env.IMAGE }}:latest
+          tags: ${{ env.IMAGE }}
           build-args: |
             GIT_SHA=${{ github.sha }}
             MODEL_VERSION=${{ env.MODEL_VERSION }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  deploy-staging:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    environment:
+      name: staging
+      url: ${{ vars.APP_URL }}
+    concurrency:
+      group: deploy-staging
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      SERVICE: ${{ vars.SERVICE_NAME }}
+      IMAGE: ${{ vars.ECR_REGISTRY }}/heat-serve:${{ github.sha }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: aws-actions/configure-aws-credentials@v5
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+      - name: Deploy to staging
+        id: deploy
+        uses: aws-actions/amazon-ecs-deploy-express-service@v1
+        with:
+          service-name: ${{ env.SERVICE }}
+          image: ${{ env.IMAGE }}
+          execution-role-arn: ${{ vars.ECS_EXECUTION_ROLE_ARN }}
+          infrastructure-role-arn: ${{ vars.ECS_INFRA_ROLE_ARN }}
+          container-port: 8000
+          health-check-path: /health
+          cpu: "512"
+          memory: "1024"
+          min-task-count: 1
+          max-task-count: 2
+      - name: Smoke test
+        run: scripts/smoke_test.sh "${{ steps.deploy.outputs.endpoint || vars.APP_URL }}" "$GITHUB_SHA"
