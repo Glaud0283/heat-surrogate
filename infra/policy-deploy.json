@@ -1,0 +1,37 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "ManageExpressServices",
+      "Effect": "Allow",
+      "Action": [
+        "ecs:CreateCluster",
+        "ecs:RegisterTaskDefinition",
+        "ecs:DescribeTaskDefinition",
+        "ecs:CreateExpressGatewayService",
+        "ecs:UpdateExpressGatewayService",
+        "ecs:UpdateService",
+        "ecs:DescribeExpressGatewayService",
+        "ecs:DescribeClusters",
+        "ecs:DescribeServices",
+        "ecs:ListServiceDeployments",
+        "ecs:DescribeServiceDeployments",
+        "ecs:TagResource",
+        "ecs:UntagResource",
+        "logs:DescribeLogGroups",
+        "logs:FilterLogEvents",
+        "logs:StartLiveTail"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "HandOnlyTheTwoServiceRolesToEcs",
+      "Effect": "Allow",
+      "Action": "iam:PassRole",
+      "Resource": [
+        "arn:aws:iam::__ACCOUNT__:role/heat-ecs-execution",
+        "arn:aws:iam::__ACCOUNT__:role/heat-ecs-infrastructure"
+      ]
+    }
+  ]
+}
